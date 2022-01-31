@@ -5,10 +5,13 @@ Code used for the numerical experiments of the companion working paper, Section 
    
 # Information
 
-Use the main.py script to run for the Two-sample problem.\\
-The functions coded in stattest_fct and fct_distribW are needed for the execution.\\
-Code the probabilistic models in datagenerator for generating the two samples.\\
-The variables are denoted as in the main paper Section Numerical Experiments.\\
+Use the main.py script to run for the Two-sample problem.
+
+The functions coded in stattest_fct and fct_distribW are needed for the execution.
+
+Code the probabilistic models in datagenerator for generating the two samples.
+
+The variables are denoted as in the main paper Section Numerical Experiments.
 
 author: Myrto Limnios // mail: myrto.limnios@ens-paris-saclay.fr
 
