@@ -1,7 +1,7 @@
 
 
-Code used for the numerical experiments of the companion main paper, Section Numerical Experiments:
-   "A Bipartite Ranking Approach to the Two-sample Problem" S. Clémençon, M. Limnios*, N. Vayatis. Working paper. 
+Code used for the numerical experiments of the companion working paper, Section Numerical Experiments:
+   "A Bipartite Ranking Approach to the Two-sample Problem" S. Clémençon, M. Limnios*, N. Vayatis.
    
 # Information
 
