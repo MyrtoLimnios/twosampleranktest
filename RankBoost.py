@@ -1,4 +1,4 @@
-# Implementation of RankBoth with modified pairwise transformation
+# Implementation of RankBost
 # Uses classifiers for scikit-learn: AdaBoostClassifier
 # author: Myrto Limnios // mail: myrto.limnios@ens-paris-saclay.fr
 
@@ -6,7 +6,7 @@ import numpy as np
 
 from sklearn.ensemble import AdaBoostClassifier
 
-class RankB(AdaBoostClassifier):
+class RankB(AdaBoostRegressor):
     def __init__(self):
         super(RankB, self).__init__()
 
@@ -32,14 +32,12 @@ class RankB(AdaBoostClassifier):
 def pairwise(X, y):
     X_new = []
     y_new = []
-    k = 0
-    for pos_idx in np.where(y == 1)[0]:
-        for all_idx in range(len(y)):
-            X_new.append(X[pos_idx] - X[all_idx])
-            y_new.append(y[all_idx])
+    y = np.asarray(y)
+    comb = itertools.combinations(range(X.shape[0]), 2)
+    for k, (i, j) in enumerate(comb):
+        X_new.append(X[i] - X[j])
+        y_new.append(np.sign(y[i, 0] - y[j, 0]))
         if y_new[-1] != (-1) ** k:
-            y_new[-1] *= -1
-            X_new[-1] *= -1
-        k += 1
-    return np.asarray(X_new), np.asarray(y_new)
-
+            y_new[-1] = - y_new[-1]
+            X_new[-1] = - X_new[-1]
+    return np.asarray(X_new), np.asarray(y_new).ravel()

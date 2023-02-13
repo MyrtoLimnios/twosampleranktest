@@ -1,16 +1,15 @@
 # Main script to run for the Two-sample problem
-# Use of the functions coded in stattest_fct and fct_distribW
+# Use of the functions coded in stattest_fct
 # Code the probabilistic models in datagenerator for generating the two samples
 # The variables are denoted as in the main paper Section Numerical Experiments:
 #    "A Bipartite Ranking Approach to the Two-sample Problem"
 
-# author: Myrto Limnios // mail: myrto.limnios@ens-paris-saclay.fr
+# author: Myrto Limnios // mail: myli@math.ku.dk
 
 # What it does:
-# 1. Samples two data samples from different distribution functions
+# 1. Samples two data samples from different distribution functions using datagenerator
 # 2. Performs a series of bipartite ranking algorithms in the first halves to learning the optimal model:
-#               LambdaRankNN, RankNN, RankSVM with L1 and L2 penalties, LinearSVR, Logistic Regression,
-#               and possibility to also use RankBoost, AdaBoost, RankSVML with L1 and L2 penalties
+#               RankNN, RankSVM L2 penalty, rForest
 #               All are coded in this projects in their respective .py
 
 # 3. Uses the outputs of 2. to score the second halves to the real line
@@ -18,15 +17,13 @@
 # 5. Compares the results to SoA algorithms: Maximum Mean Discrepancy [Gretton et al. 2012],
 #               Energy statistic [Szekely et al. 2004], and Wald-Wolfowitz [Friedman et al. 1979] coded at
 #               https://github.com/josipd/torch-two-sample that needed to be updated
-
-# NB: Initial implementation for RankNN and LambdaRankNN from https://github.com/liyinxiao/LambdaRankNN. Modified for
-#       the two-sample procedure as detailed in the companion paper
+#               also compared to Tukey depth adapted from https://github.com/GuillaumeStaermanML/DRPM
+# 6. Outputs the numerical pvalue for each sampling loop
 
 
 
 import stattest_fct
 import datagenerator as data
-import fct_distribW
 
 import pandas as pd
 import numpy as np
@@ -36,23 +33,23 @@ import torch
 import torch_two_sample as twospl
 
 from sklearn.model_selection import train_test_split
-from RankNN import LambdaRankNN, RankNetNN
-from RankSVM import RankSVM, RankSVMR, RankSVML
-from RankBoost import RankB
+from RankNN import RankNetNN
+from RankSVM import RankSVM
+from RankBoost import RankRB
+import treerank as TR
 
-from sklearn.svm import LinearSVR
-from sklearn.linear_model import LogisticRegression
-
+from scipy.stats import rankdata, ranksums, mannwhitneyu
+from scipy.stats import norm as statnorm
 
 import datetime
 import random
-rds = 4
-random.seed(rds)
-torch.manual_seed(rds)
+
+seed =
+rng = np.random.default_rng(seed)
+
 
 
 '''  generate two-sample data '''
-
 test_size = #Step1/Step2 size split (iee train/test split of the original dataset)
 eps =  #discrepancy parameter
 theta =   #angle of rotation between samples
@@ -60,18 +57,14 @@ distrib = '' #distribution type, related to the probabilistic model if one (used
 sample_type = ''  #location, scale, blobs_loc, blobs_rot, related to the probabilistic model if one
 # (used with the models from datagenerator)
 
-
-
 epoch =  # epochs in the LTR algo
 Ksub = # number of MC sampling loops for the learning algorithms
 
 '''  Test parameters  '''
 alpha =  #threshold of the tests
-
-'''  Power estimation parameters for rank statistics  '''
-range_RTB = []  # values of u_0 of the RTB score-generating function
-range_rk = range_RTB.append('MWW')  #list of the score-generating functions
 B_pow = #number of MC sampling loops for the power estimation
+K_rank =
+n_dir =  #number directions for Tukey depth
 
 '''  Benchmark tests parameters '''
 alphas_ = [1e-3, 1e-2, 1e-1, 1, 5, 10, 15, 20, 25, 30, 1e2, 1e3]  # hyperparameters for the optimization of the SoA
@@ -82,6 +75,7 @@ list_test.pop(4)
 list_test.pop(0)
 num_other_tests = len(list_test)
 print(list_test)
+n_perm =  #number of permutations for estimation of the null distribution
 
 list_names = ['MMD', 'Energy', 'FR']
 eps_range = []
@@ -89,17 +83,7 @@ eps_range = []
 param_range = eps_range
 
 '''   Complete with the path to your directory '''
-path_RTB = r'/Users/' + sample_type + '/'
-path_others = r'/Users/'+ sample_type + '/'
-path = r'/Users/' + sample_type + '/'
-
-
-k = 0
-
-""" Choice of Bipartite Ranking algorithms """
-rank_rSVM = True
-rank_RNN = True
-other_test = True
+path_MWW = r'/Users/' + sample_type + '/'
 
 
 """ Initialization of the algorithmic parameters"""
@@ -109,327 +93,167 @@ n, m = 0, 0
 sim, str_param = 0, 0
 
 B_power_rk = 10
+name_BR = ['rSVM2', 'rForest', 'rBoost', 'Tukey']
 
-df_pred_lrnn = {}
-df_pred_rnn = {}
-df_pred_rsvm2 = {}
-df_pred_rsvm = {}
-df_pred_rsvr = {}
-df_pred_rsvl = {}
-df_pred_star = {}
-
-df_pred_true = {}
+subspl_len = []
+ntst, mtst = 0, 0
+n, m = 0, 0
+sim, str_param = 0, 0
 
 
-for nsub in [500]:  ###  sample sizes
+for N in []:
+    ntst, mtst = int(N/10), int(N/10)
+    n, m = int(4*N/10), int(4*N/10)
+    subspl_len = [ntst, mtst]
 
-    ntst, mtst = int(nsub/5), int(nsub/5)
-    n, m = int(4*nsub/5), int(4*nsub/5)
-    subspl_len =[ntst, mtst]
+    print('sizes', n, ntst)
 
+    for d in []:
 
-    print('sizes', n, ntst, nsub)
+        print('loop', 'sample size', 'd', d)
 
-    for d in [6]:
-
-        print('loop', 'sample size', nsub, 'd', d)
-
-        sim = sample_type + str(n) + str(m) + str(d) + str(epoch) + str(Ksub) + str(B_power_rk) + str(int(ntst)) + str(
+        sim = sample_type + str(n) + str(m) + str(d) + str(epoch) + str(Ksub) + str(B_pow) + str(int(ntst)) + str(
             int(mtst))
         str_param = sim
 
-        lay = (int(2*d), int(d),)
-
-        '''  Loop on eps and save the results in a csv file '''
-        res_rk_rsvm = []
-        res_rk_rsvm2 = []
-        res_rk_rsvr = []
-        res_rk_rsvl = []
-        res_rk_lrnn = []
-        res_rk_rnn = []
-        res_rk_star = []
-        res_all_others = []
-
-        df_rk_lrnn = {}
-        df_rk_rnn = {}
-        df_rk_rsvm2 = {}
-        df_rk_rsvm = {}
-        df_rk_rsvr = {}
-        df_rk_rsvl = {}
-        df_rk_star = {}
-        df_others = {}
 
         for eps in np.around(eps_range, decimals=2):
-            print('sizes', n, ntst, nsub, d, eps)
+            print('sizes', n, ntst, d, eps)
 
             '''  Generate the data: XY matrix of the twosamples, with scor=1 for X and scor=0 for Y, q=unit vector '''
             print('Generate datasets')
 
-            XY_train, s_train, mu_X, mu_Y, S_X, S_Y = data.XY_generator(n, m, d, eps, theta, sample_type, distrib,  plot_data = False)
-            x_test, scor_test, mu_X, mu_Y, S_X, S_Y = data.XY_generator(ntst, mtst, d, eps, theta, sample_type, distrib, plot_data=False)
 
-            subspl_len = [ntst, mtst]
+            pwr_rk = np.zeros((1, len(name_BR)))
+            dict_pvalue_MWW = dict(zip(name_BR, [[] for i in range(len(name_BR))]))
+            dict_pvalue_RTB7 = dict(zip(name_BR, [[] for i in range(len(name_BR))]))
+            dict_pvalue_RTB8 = dict(zip(name_BR, [[] for i in range(len(name_BR))]))
+            dict_pvalue_RTB9 = dict(zip(name_BR, [[] for i in range(len(name_BR))]))
 
-            if eps > 0.0:
-                """ Compute the best parameter"""
-                orig_star = - mu_X.T @ inv(S_X) @ mu_X + mu_Y.T @ inv(S_X) @ mu_Y
-                theta_star = np.dot(inv(S_X), (mu_X - mu_Y)) / np.sqrt(norm(np.dot(inv(S_X), (mu_X - mu_Y))))
-                print('theta star', theta_star)
-                y_predstar = np.dot(x_test, theta_star)
-            else:
-                y_predstar = np.zeros(len(scor_test))
+            pwr_othr_ = np.zeros((1, len(list_names) - 1))
+            dict_pval_othr = dict(zip(list_names, [[] for i in range(len(list_names))]))
 
-            """ Thresholds of the rank tests"""
-            thresh_rtb = fct_distribW.thresh_rangeRTB_null_CB(ntst, mtst, range_RTB, alpha)
-            print('thresh table W', thresh_rtb)
+            XY_train_, s_train_, mu_X, mu_Y, S_X, S_Y = data.XY_generator(n*B_pow, m*B_pow, d, eps, theta, sample_type, distrib, rng)
+            x_test_, scor_test_, _, _, _, _, = data.XY_generator(ntst*B_pow, mtst*B_pow, d, eps, theta, sample_type, distrib, rng)
+            s_train, scor_test = np.concatenate((np.ones(n), np.zeros(m))).astype(np.float32), np.concatenate((np.ones(ntst), np.zeros(mtst))).astype(np.float32)
 
-            thresh_rtb = fct_distribW.thresh_rangeRTB_nulld(ntst, mtst, range_RTB, alpha)
-            print('thresh table W', thresh_rtb)
-
-            pwr_cv = np.zeros((len(range_rk), 5))
-            pwr_cv_othr = np.zeros(num_other_tests)
-
-            for b in range(B_power_rk):
+            for b in range(B_pow):
                 """ subsampling multivariate two samples for the Rank tests """
-                idx_x, _, scor_train, _ = train_test_split(range(int(n+m)), s_train, test_size=1/10, stratify=s_train,
-                                                                                                 random_state=rds)
-                x_train = XY_train[idx_x]
-                ns = int(np.sum(scor_train))
-                ms = int(len(scor_train) - ns)
+                XY_train = np.concatenate((XY_train_[n*b:n*(b+1)], XY_train_[n*B_pow + m*b:n*B_pow + m*(b+1)])).astype(np.float32)
+                x_test = np.concatenate((x_test_[ntst*b:ntst*(b+1)], x_test_[ntst*B_pow + mtst*b:ntst*B_pow + mtst*(b+1)])).astype(np.float32)
 
-                print('subsampling n, m' , ns, ms)
+                print('indices train from', n*b, 'to',  n*(b+1), 'from',  n*B_pow + m*b, 'to', n*B_pow + m*(b+1))
+                print('indices test', ntst*b, ntst*B_pow + mtst*b, ntst*B_pow + mtst*(b+1))
+                print('len', len(XY_train), len(x_test))
+                print('n, m', n, m, ntst, mtst, len(XY_train), len(x_test))
 
-                y_pred_rsvm, y_pred_rsvm2 = np.zeros(len(scor_test)), np.zeros(len(scor_test))
-                y_pred_rsvr, y_pred_rsvl = np.zeros(len(scor_test)), np.zeros(len(scor_test))
-                y_pred_lrnn, y_pred_rnn = np.zeros(len(scor_test)), np.zeros(len(scor_test))
+                x_train_ = XY_train
+                scor_train_ = s_train
 
-                y_rnn = []
-                y_rsvm = []
-                y_rsvr = []
-                y_rsvl = []
+                y_pred_rsvm = np.zeros(ntst + mtst)
+                y_pred_tr = np.zeros(ntst + mtst)
+                y_pred_rboost = np.zeros(ntst + mtst)
+                y_pred_rnn = np.zeros(ntst + mtst)
+                proj_XYtest = np.zeros(ntst + mtst)
+
                 s_predrk_list = []
 
-                if rank_rSVM == True:
-                    for ksub in range(Ksub):
+                print("#" * 80, "#{:^78}#".format("TREE"), "#" * 80, sep='\n')
+                for kt in range(K_tree):
 
-                        idx = np.random.permutation(len(scor_train))
-                        x_train_, scor_train_ = x_train[idx], scor_train[idx]
-                        scor_train_transf = 2 * scor_train_ - 1
+                    XY_index = np.arange(0, len(s_train))
+                    XY_index_train, _, scor_train_t, _ = train_test_split(XY_index, s_train, test_size=0.05,
+                                                                          stratify=s_train)
+                    xtrain_temp = x_train_[XY_index_train]
+                    scor_train_t = 2 * scor_train_t - 1
 
-                        rSVM = RankSVM(loss='squared_hinge', penalty='l1', #random_state=rds,
-                                        fit_intercept=True, dual = False, tol=1e-6, C=100.)
-                        rSVM.fit(x_train_, scor_train_transf)
+                    tree = TR.TreeRANK(max_depth=d, verbose=0, C=100.0, penalty='l2', fit_intercept=True)
+                    tree.fit(xtrain_temp, scor_train_t)
 
-                        pred = (rSVM.predict(x_test) + 1) / 2
-                        y_pred_rsvm += pred / Ksub
-                        print('pred', np.sum(pred - scor_test))
+                    """" Predict """
+                    y_pred_tr += tree.predict_scor(x_test) / K_tree
 
+                    if kt < K_rank:
+                        rsvm = RankSVM(loss='squared_hinge', penalty='l2', fit_intercept=True, dual=False, tol=1e-6, C=100.,
+                                       max_iter=10000)
+                        rsvm.fit(xtrain_temp, scor_train_t)
 
-                        rSVM2 = RankSVM(loss='squared_hinge', penalty='l2',   #random_state=rds,
-                            fit_intercept=True, dual = False, tol=1e-6, C=100.)
-                        rSVM2.fit(x_train_, scor_train_transf)
-                        pred = (rSVM2.predict(x_test) + 1)/2
-                        y_pred_rsvm2 += pred / Ksub
-                        print('pred2', np.sum(pred - scor_test))
+                        rboost = RankBR()
+                        rboost.fit(xtrain_temp, scor_train_t)
 
-                        rSVMR = LinearSVR(loss='epsilon_insensitive', tol=1e-6, C=100.)
-                        rSVMR.fit(x_train_, scor_train_transf)
-                        pred = (rSVMR.predict(x_test) + 1)/2
-                        y_pred_rsvr += pred / Ksub
-                        print('pred_rsvr', np.sum(pred - scor_test))
+                        y_pred_rsvm += rsvm.predict(x_test) / K_rank
+                        y_pred_rboost += rboost.predict(x_test) / K_rank
 
-                        rSVML = LogisticRegression(penalty='l2',  tol=1e-6, C=100.)
-                        rSVML.fit(x_train_, scor_train_transf)
-                        pred = (rSVML.predict(x_test) + 1) / 2
-                        y_pred_rsvl += pred / Ksub
-                        print('pred_rsvr', np.sum(pred - scor_test))
+                ranker = RankNetNN(input_size=XY_train.shape[1], hidden_layer_sizes=lay, activation=('relu', 'relu',), solver='adam')
+                ranker.fit(XY_train, scor_train_transf, epochs=epoch)
+                y_pred_rnn = (ranker.predict(x_test) + 1) / 2
 
+                """ TUKEY DEPTH """
+                proj_XYtest = depth_test.tukey_depth_proj(XY_train[np.where(scor_test == 1)], x_test, n_dir)
 
-                    y_rsvm = [y_pred_rsvm, y_pred_rsvm2, y_pred_rsvr, y_pred_rsvl]
-                    df_pred_rsvm2[str(b)] = y_pred_rsvm2
-                    df_pred_rsvm[str(b)] = y_pred_rsvm
-                    df_pred_rsvr[str(b)] = y_pred_rsvr
-                    df_pred_rsvl[str(b)] = y_pred_rsvl
-                    df_pred_star[str(b)] = y_predstar
-                    df_pred_true[str(b)] = scor_test
+                s_predrk_list = []
 
-                if rank_RNN == True :
-                    scor_train_transf = 2*scor_train -1
-                    lambdaranker = LambdaRankNN(input_size=x_train.shape[1], hidden_layer_sizes=lay,
-                                                activation=('relu', 'relu',), solver='adam')
-                    lambdaranker.fit(x_train, scor_train_transf, epochs=epoch)
-                    y_pred_lrnn = (lambdaranker.predict(x_test) + 1) / 2
+                ind = 0
+                for ypred in s_predrk_list:
+                    sx = ypred[np.where(scor_test == 1)].tolist()
+                    sy = ypred[np.where(scor_test == 0)].tolist()
 
-
-                    '''  train model LambdaRank '''
-                    ranker = RankNetNN(input_size=x_train.shape[1], hidden_layer_sizes=lay,
-                                       activation=('relu', 'relu',),
-                                      solver='adam')
-                    ranker.fit(x_train, scor_train_transf, epochs=epoch)
-                    y_pred_rnn = (ranker.predict(x_test) + 1) / 2
-                    print(np.sum(y_pred_rnn), np.sum(y_pred_lrnn))
-
-                    y_rnn = [y_pred_lrnn, y_pred_rnn]
-
-                    df_pred_lrnn[str(b)] = y_pred_lrnn
-                    df_pred_rnn[str(b)] = y_pred_rnn
-
-                if rank_rSVM == True:
-                    if rank_RNN == True :
-                        s_predrk_list = [ y_pred_rsvm , y_pred_rsvm2, y_pred_rsvr, y_pred_rsvl , y_pred_lrnn, y_pred_rnn , y_predstar ]
+                    if (sx == sy) == True:
+                        dict_pvalue_MWW[name_BR[ind]].append(1.0)
+                        dict_pvalue_RTB9[name_BR[ind]].append(1.0)
+                        dict_pvalue_RTB8[name_BR[ind]].append(1.0)
+                        dict_pvalue_RTB7[name_BR[ind]].append(1.0)
                     else:
-                        s_predrk_list = [y_pred_rsvm, y_pred_rsvm2, y_pred_rsvr, y_pred_rsvl, y_predstar ]
-                else:
-                    s_predrk_list = [ y_pred_lrnn, y_pred_rnn, y_predstar]
+                        mww, mww_pR = mannwhitneyu(sx, sy, use_continuity=True, alternative='greater')
+                        W9, pval9, _, _, _ = stattest_fct.get_RTB_pval(np.concatenate((sx, sy)), ntst, mtst, 0.9, alpha, asymptotic=True)
+                        W8, pval8, _, _, _ = stattest_fct.get_RTB_pval(np.concatenate((sx, sy)), ntst, mtst, 0.8, alpha, asymptotic=True)
+                        W7, pval7, _, _, _ = stattest_fct.get_RTB_pval(np.concatenate((sx, sy)), ntst, mtst, 0.7, alpha, asymptotic=True)
+                        dict_pvalue_MWW[name_BR[ind]].append(mww_pR)
+                        dict_pvalue_RTB9[name_BR[ind]].append(pval9)
+                        dict_pvalue_RTB8[name_BR[ind]].append(pval8)
+                        dict_pvalue_RTB7[name_BR[ind]].append(pval7)
 
+                    ind +=1
 
-                ''' Power estimation for all methods '''
+                XY_oth = np.concatenate((XY_train, x_test))
+                scor_oth = np.concatenate((s_train, scor_test))
+                pwr_, pwr_dict, pval_othr = stattest_fct.emp_power_other_onetest_pval(XY_oth, scor_oth, list_test, alphas_, alpha,
+                                                                                      npermutations=n_perm)
+                pwr_othr_ += pwr_ / B_pow
+                for i in range(len(list_names)-1):
+                    dict_pval_othr[list_names[i]].append(pval_othr[i])
 
-                pwr_RTB, pwr_RTB_dict, pwr_other_rk = stattest_fct.emp_power_allrank(x_test, scor_test, s_predrk_list,
-                                                                                     thresh_rtb, alpha, range_RTB, 1, subspl_len)
+                dict_pval_othr['Tukey'] = dict_pvalue_MWW['Tukey']
 
+                print('sampling loop', b, d, eps)
+                print('MWW', dict_pvalue_MWW)
+                print('RTB9', dict_pvalue_RTB9)
+                print('RTB8', dict_pvalue_RTB8)
+                print('RTB7', dict_pvalue_RTB7)
+                print('SOA', dict_pval_othr)
 
-                pwr_rk = np.concatenate((pwr_RTB, np.array([pwr_other_rk])), axis=0)
-                pwr_cv += pwr_rk
+            ''' Power estimation for all methods '''
 
-                XY_oth = np.concatenate((x_train,x_test))
-                scor_oth = np.concatenate((scor_train,scor_test))
-                pwr_, _ = stattest_fct.emp_power_other_onetest(XY_oth, scor_oth, num_other_tests, list_test, alphas_, alpha)
-                pwr_cv_othr += pwr_
+            df_pvalue_MWW = pd.DataFrame.from_dict(dict_pvalue_MWW)
+            df_pvalue_MWW.to_csv(path_MWW + 'pval_MWW_all_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + 'eps' + str(eps) + '.csv')
+            df_pvalue_MWW = {}
 
-                print('pwr_rank', pwr_rk)
-                print('pwr_', pwr_)
-                print('sampling loop', b, ns, ms, d, eps)
+            df_pvalue_RTB9 = pd.DataFrame.from_dict(dict_pvalue_RTB9)
+            df_pvalue_RTB9.to_csv(path_MWW + 'pval_RTB9_all_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + 'eps' + str(eps) + '.csv')
+            df_pvalue_RTB9 = {}
 
-            pwr_rk = pwr_cv / B_power_rk
-            pwr_ = pwr_cv_othr / B_power_rk
-            pwr_dict = dict(zip(list_names, np.around(pwr_, decimals=4)))
+            df_pvalue_RTB8 = pd.DataFrame.from_dict(dict_pvalue_RTB8)
+            df_pvalue_RTB8.to_csv(path_MWW + 'pval_RTB8_all_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + 'eps' + str(eps) + '.csv')
+            df_pvalue_RTB8 = {}
 
-            print('pwr_cv_rk', pwr_rk)
-            print('pwr_cv_othr', pwr_dict)
+            df_pvalue_RTB7 = pd.DataFrame.from_dict(dict_pvalue_RTB7)
+            df_pvalue_RTB7.to_csv(path_MWW + 'pval_RTB7_all_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + 'eps' + str(eps) + '.csv')
+            df_pvalue_RTB7 = {}
 
+            df_pvalue_SOA = pd.DataFrame.from_dict(dict_pval_othr)
+            df_pvalue_SOA.to_csv(path_MWW + 'pval_SoA_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + 'eps' + str(eps) + '.csv')
+            df_pvalue_SOA = {}
 
-            if rank_rSVM == True :
-                pwr_rsvm = [pwr_rk[k, 0] for k in range(len(pwr_rk))]
-                pwr_rk_dict_rsvm = dict(zip(range_rk, pwr_rsvm))
-                res_rk_rsvm.append(pwr_rk_dict_rsvm)
-
-                pwr_rsvm2= [pwr_rk[k, 1] for k in range(len(pwr_rk))]
-                pwr_rk_dict_rsvm2 = dict(zip(range_rk, pwr_rsvm2))
-                res_rk_rsvm2.append(pwr_rk_dict_rsvm2)
-
-                pwr_rsvr= [pwr_rk[k, 2] for k in range(len(pwr_rk))]
-                pwr_rk_dict_rsvr = dict(zip(range_rk, pwr_rsvr))
-                res_rk_rsvr.append(pwr_rk_dict_rsvr)
-
-                pwr_rsvl = [pwr_rk[k, 3] for k in range(len(pwr_rk))]
-                pwr_rk_dict_rsvl = dict(zip(range_rk, pwr_rsvl))
-                res_rk_rsvl.append(pwr_rk_dict_rsvl)
-
-            if rank_RNN == True :
-                if rank_rSVM == True : j = 4
-                else : j = 0
-                pwr_lrnn = [pwr_rk[k, j] for k in range(len(pwr_rk))]
-                pwr_rk_dict_lrnn = dict(zip(range_rk, pwr_lrnn))
-                res_rk_lrnn.append(pwr_rk_dict_lrnn)
-
-                pwr_rnn = [pwr_rk[k, j+1] for k in range(len(pwr_rk))]
-                pwr_rk_dict_rnn = dict(zip(range_rk, pwr_rnn))
-                res_rk_rnn.append(pwr_rk_dict_rnn)
-
-                pwr_star = [pwr_rk[k, j+2] for k in range(len(pwr_rk))]
-                pwr_rk_dict_star = dict(zip(range_rk, pwr_star))
-                res_rk_star.append(pwr_rk_dict_star)
-
-            if other_test == True:
-                res_all_others.append(pwr_dict)
-                print('loop', pwr_rk, pwr_dict)
-
-        df_all = [
-            df_pred_lrnn,
-            df_pred_rnn,
-            df_pred_rsvm2,
-            df_pred_rsvm,
-            df_pred_rsvr,
-            df_pred_rsvl,
-            df_pred_star,
-            df_pred_true]
-        name = ['lRNN', 'RNN', 'rSVM2', 'rSVM', 'rSVR', 'rSVL', 'star', 'true']
-
-        k = 0
-        for df in df_all:
-            df_ = pd.DataFrame(df)
-            df_.to_csv(
-                path + 'pred_' + name[k] + '_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            k += 1
-
-        if rank_rSVM == True :
-            res_rk_rsvm_dict = dict(zip(param_range, res_rk_rsvm))
-            res_rk_rsvm_dict2 = dict(zip(param_range, res_rk_rsvm2))
-            res_rk_rsvr_dict = dict(zip(param_range, res_rk_rsvr))
-            res_rk_rsvl_dict = dict(zip(param_range, res_rk_rsvl))
-
-            print(res_rk_rsvm_dict)
-
-            df_rk_rsvm = pd.DataFrame.from_dict(res_rk_rsvm_dict)
-            df_rk_rsvm.to_csv(path_RTB + 'power_Rk_rSVM_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            df_rk_rsvm = {}
-
-            df_rk_rsvm2 = pd.DataFrame.from_dict(res_rk_rsvm_dict2)
-            df_rk_rsvm2.to_csv(path_RTB + 'power_Rk_rSVM2_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            df_rk_rsvm2 = {}
-
-            df_rk_rsvr = pd.DataFrame.from_dict(res_rk_rsvr_dict)
-            df_rk_rsvr.to_csv(path_RTB + 'power_Rk_rSVR_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            df_rk_rsvr = {}
-
-            df_rk_rsvl = pd.DataFrame.from_dict(res_rk_rsvl_dict)
-            df_rk_rsvl.to_csv(path_RTB + 'power_Rk_rSVL_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            df_rk_rsvl = {}
-
-
-            print('rSVM l1', res_rk_rsvm_dict)
-            print('rSVM l2', res_rk_rsvm_dict2)
-
-            print('rSVR', res_rk_rsvr_dict)
-            print('rSVL', res_rk_rsvl_dict)
-
-
-        if rank_RNN == True :
-            res_rk_lrnn_dict = dict(zip(param_range, res_rk_lrnn))
-            res_rk_rnn_dict = dict(zip(param_range, res_rk_rnn))
-            res_rk_star_dict = dict(zip(param_range, res_rk_star))
-
-            df_rk_lrnn = pd.DataFrame.from_dict(res_rk_lrnn_dict)
-            df_rk_lrnn.to_csv(path_RTB + 'power_Rk_lRNN_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            df_rk_lrnn = {}
-
-            df_rk_rnn = pd.DataFrame.from_dict(res_rk_rnn_dict)
-            df_rk_rnn.to_csv(path_RTB + 'power_Rk_RNN_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            df_rk_rnn = {}
-
-            df_rk_star = pd.DataFrame.from_dict(res_rk_star_dict)
-            df_rk_star.to_csv(path_RTB + 'power_Rk_star_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            df_rk_star = {}
-
-
-            print('lRNN', res_rk_lrnn_dict)
-            print('RNN', res_rk_rnn_dict)
-            print('star', res_rk_star_dict)
-
-
-
-        if other_test == True:
-            res_all_others_dict = dict(zip(param_range, res_all_others))
-
-            df_others = pd.DataFrame.from_dict(res_all_others_dict)
-            df_others.to_csv(
-                path_others + 'power_others_' + datetime.datetime.today().strftime("%m%d%H%M") + str_param + '.csv')
-            df_others = {}
-
-            print('Others results', res_all_others_dict)
-
-
-        print('loop', 'sample size', nsub, 'd', d)
+            print('loop', 'sample size', 'd', d)
 
 
