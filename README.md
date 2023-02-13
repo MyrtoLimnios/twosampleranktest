@@ -19,7 +19,7 @@ author: Myrto Limnios, mail: myli@math.ku.dk
 # What it does:
  1. Samples two data samples from different distribution functions using datagenerator
  2. Performs a series of bipartite ranking algorithms in the first halves to learning the optimal model:
-               RankNN, RankSVM L2 penalty, rForest
+               RankNN, RankSVM L2 penalty, rForest, rBoost 
                All are coded in this projects in their respective .py
 
  3. Uses the outputs of 2. to score the second halves to the real line
